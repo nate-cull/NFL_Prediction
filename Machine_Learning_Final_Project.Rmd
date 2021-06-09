@@ -1,0 +1,1034 @@
+---
+title: "Machine_Learning_Final_Project"
+author: "Nate Cull, Kathleen Roe, Liam Kincaid, Caspar Hu, Ben Reutelshofer"
+date: "11/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Loading Necessary Packages and Helper Functions
+
+```{r}
+# Loading Necessary Packages
+library(nflfastR) # Load nflfastR
+library(tidyverse) # Load tidyverse
+library(ggplot2) # Load ggplot2
+library(ggdark) # Load ggdark
+library(ggimage) # Load ggimage
+library(GGally) # Load GGally
+library(ggrepel) # Load ggrepel
+library(xgboost)
+library(caret)
+source("pbp_functions.r")
+```
+
+Scraping 2019 and 2020 NFL Game data
+```{r}
+# Scrape 2019 data
+games_2019 <- fast_scraper_schedules(2019) %>% pull(game_id)
+pbp_2019 <- as.data.frame(fast_scraper(games_2019, pp = TRUE))
+pbp_2019 <- pbp_2019[pbp_2019$season_type == "REG",]
+
+# Scrape 2020 data
+games_2020 <- fast_scraper_schedules(2020) %>% pull(game_id)
+pbp_2020 <- as.data.frame(fast_scraper(games_2020, pp = TRUE))
+```
+
+VISUALIZATIONS
+
+Visualization 1 - Win Probability Graph: Falcons vs. Cowboys, Week 2
+```{r}
+# Select Atlanta v Dallas
+game_dat <- pbp_2020[pbp_2020$week == 2 & pbp_2020$home_team == "DAL" &
+                       !is.na(pbp_2020$home_wp) & !is.na(pbp_2020$away_wp),]
+# Get team colors
+dal_color <- teams_colors_logos$team_color[teams_colors_logos$team_abbr == "DAL"]
+atl_color <- teams_colors_logos$team_color[teams_colors_logos$team_abbr == "ATL"]
+# Generate plot
+g_1 <- game_dat %>%
+  dplyr::select(game_seconds_remaining, # Use game seconds remaining
+                home_wp, # Use home win probability
+                away_wp) %>% # Use away win probability
+  gather(team, wpa, -game_seconds_remaining) %>% # Melt data
+  ggplot(aes(x = game_seconds_remaining, y = wpa, color = team)) + # Set aestheticd
+  geom_line(size = 2) + # Set geom line
+  geom_hline(yintercept = 0.5, color = "gray", linetype = "dashed") + # Set horizonal line
+  scale_color_manual(labels = c("away_wp" = "ATL", "home_wp" =" DAL"), # Set colors manually
+                     values = c("away_wp" = atl_color, "home_wp" = dal_color),
+                     guide = FALSE) +
+  scale_x_reverse(breaks = seq(0, 3600, 300)) +  # Flip coords to count down
+  annotate("text", x = 3000, y = .75, label = "ATL", color = atl_color, size = 8) + # Add team labels
+  annotate("text", x = 3000, y = .25, label = "DAL", color = dal_color, size = 8) + # Add team labels
+  geom_vline(xintercept = 900, linetype = "dashed", color = "black") +  # Add quarter lines
+  geom_vline(xintercept = 1800, linetype = "dashed", color = "black") + 
+  geom_vline(xintercept = 2700, linetype = "dashed", color = "black") + 
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + 
+  labs( x = "Time Remaining (seconds)", # Add labels
+        y = "Win Probability",
+        title = "Week 2 Win Probability Chart",
+        subtitle = "Dallas Cowboys vs. Atlanta Falcons") + 
+  theme_bw() # Set theme
+g_1
+```
+
+2019 EPA and WPA Statistics
+```{r}
+# Calculate offensive EPA statistics
+off_epa_dat_2019 <- epa_calculator(data = pbp_2019)
+# Calculate defensive EPA statistics
+def_epa_dat_2019 <- def_epa_calculator(data = pbp_2019)
+# Calculate offensive WPA statistics
+off_wpa_dat_2019 <- wpa_calculator(data = pbp_2019)
+# Calculate defensive WPA statistics
+def_wpa_dat_2019 <- def_wpa_calculator(data = pbp_2019)
+
+summary(off_epa_dat_2019)
+summary(off_wpa_dat_2019)
+```
+
+2020 EPA and WPA Statistics
+```{r}
+# Calculate offensive EPA statistics
+off_epa_dat_2020 <- epa_calculator(data = pbp_2020)
+# Calculate defensive EPA statistics
+def_epa_dat_2020 <- def_epa_calculator(data = pbp_2020)
+# Calculate offensive WPA statistics
+off_wpa_dat_2020 <- wpa_calculator(data = pbp_2020)
+# Calculate defensive WPA statistics
+def_wpa_dat_2020 <- def_wpa_calculator(data = pbp_2020)
+
+summary(off_epa_dat_2020)
+summary(off_wpa_dat_2020)
+```
+
+WPA 2019 Visualizations
+Visualizations 2 and 3- Pass/Run WPA per play vs. Average Pass/Run Plays 2019
+```{r}
+# Identify unique teams
+teams <- unique(na.omit(pbp_2019$posteam))
+# Order teams alphabetically
+teams <- teams[order(teams)]
+# Add logos to Offensive EPA data
+off_wpa_dat_2019$logos <- teams_colors_logos$team_logo_espn[teams_colors_logos$team_abbr %in% teams]
+# Create plot
+g_2 <- ggplot(off_wpa_dat_2019, # Set dataset
+              aes(x = pass_per_game, # Set x axis as passes per game 
+                  y = avg_pass_wpa  # Set y axis as average pass epa
+              )) + 
+  geom_point(alpha = 0.3) + # Set geom_point for scatter
+  geom_image(aes(image = logos), size = 0.05, asp = 16 / 9) + # Use geom_image to use logos
+  dark_theme_bw() + # Set dark theme
+  theme(legend.position="none", # Turn off legend
+        panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank(),
+        aspect.ratio = 9 / 16,
+        plot.title = element_text(size = 12, hjust = 0.5, face = "bold")) +  # Remove grid
+  labs(x= "Passes per Game", y ="WPA per Pass Play", # Set labels
+       title = "Pass WPA per play v Average Pass Plays",
+       subtitle = "NFL Teams 2019")
+
+# Generate plot
+g_2
+# Turn off dark mode
+invert_geom_defaults()
+
+g_3 <- ggplot(off_wpa_dat_2019, # Set dataset
+              aes(x = runs_per_game, # Set x axis as passes per game 
+                  y = avg_run_wpa  # Set y axis as average pass epa
+              )) + 
+  geom_point(alpha = 0.3) + # Set geom_point for scatter
+  geom_image(aes(image = logos), size = 0.05, asp = 16 / 9) + # Use geom_image to use logos
+  dark_theme_bw() + # Set dark theme
+  theme(legend.position="none", # Turn off legend
+        panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank(),
+        aspect.ratio = 9 / 16,
+        plot.title = element_text(size = 12, hjust = 0.5, face = "bold")) +  # Remove grid
+  labs(x= "Runs per Game", y ="WPA per Run Play", # Set labels
+       title = "Run WPA per play v Average Run Plays",
+       subtitle = "NFL Teams 2019")
+# Generate plot
+g_3
+# Turn off dark mode
+invert_geom_defaults()
+```
+
+EPA 2019 Visualizations
+Visualizations 4 and 5- Run/Pass EPA per play vs. Average Run/Pass Plays - 2019
+```{r}
+off_epa_dat_2019$logos <- teams_colors_logos$team_logo_espn[teams_colors_logos$team_abbr %in% teams]
+# Create plot
+g_4 <- ggplot(off_epa_dat_2019, # Set dataset
+              aes(x = pass_per_game, # Set x axis as passes per game 
+                  y = avg_pass_epa  # Set y axis as average pass epa
+              )) + 
+  geom_point(alpha = 0.3) + # Set geom_point for scatter
+  geom_image(aes(image = logos), size = 0.05, asp = 16 / 9) + # Use geom_image to use logos
+  dark_theme_bw() + # Set dark theme
+  theme(legend.position="none", # Turn off legend
+        panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank(),
+        aspect.ratio = 9 / 16,
+        plot.title = element_text(size = 12, hjust = 0.5, face = "bold")) +  # Remove grid
+  labs(x= "Passes per Game", y ="EPA per Pass Play", # Set labels
+       title = "Pass EPA per play v Average Pass Plays",
+       subtitle = "NFL Teams 2019")
+
+# Generate plot
+g_4
+# Turn off dark mode
+invert_geom_defaults()
+
+# Create plot
+g_5 <- ggplot(off_epa_dat_2019, # Set dataset
+              aes(x = runs_per_game, # Set x axis as passes per game 
+                  y = avg_run_epa  # Set y axis as average pass epa
+              )) + 
+  geom_point(alpha = 0.3) + # Set geom_point for scatter
+  geom_image(aes(image = logos), size = 0.05, asp = 16 / 9) + # Use geom_image to use logos
+  dark_theme_bw() + # Set dark theme
+  theme(legend.position="none", # Turn off legend
+        panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank(),
+        aspect.ratio = 9 / 16,
+        plot.title = element_text(size = 12, hjust = 0.5, face = "bold")) +  # Remove grid
+  labs(x= "Runs per Game", y ="EPA per Run Play", # Set labels
+       title = "Run EPA per play v Average Run Plays",
+       subtitle = "NFL Teams 2019")
+
+# Generate plot
+g_5
+# Turn off dark mode
+invert_geom_defaults()
+```
+
+Visualization 6: Offense vs. Defense EPA 2019
+```{r}
+offense <- pbp_2019 %>% group_by(posteam) %>% summarise(off_epa = mean(epa, na.rm = TRUE))
+defense <- pbp_2019 %>% group_by(defteam) %>% summarise(def_epa = mean(epa, na.rm = TRUE))
+logos <- teams_colors_logos %>% select(team_abbr, team_logo_espn)
+
+g_6 <- offense %>%
+  inner_join(defense, by = c("posteam" = "defteam")) %>%
+  inner_join(logos, by = c("posteam" = "team_abbr")) %>%
+  ggplot(aes(x = off_epa, y = def_epa)) +
+  geom_abline(slope = -1.5, intercept = c(.4, .3, .2, .1, 0, -.1, -.2, -.3), alpha = .2) +
+  geom_hline(aes(yintercept = mean(off_epa)), color = "red", linetype = "dashed") +
+  geom_vline(aes(xintercept = mean(def_epa)), color = "red", linetype = "dashed") +
+  geom_image(aes(image = team_logo_espn), size = 0.05, asp = 16 / 9) +
+  labs(
+    x = "Offense EPA/play",
+    y = "Defense EPA/play",
+    caption = "Data: @nflfastR",
+    title = "2019 NFL Offensive and Defensive EPA per Play"
+  ) +
+  dark_theme_bw() +
+  theme(
+    aspect.ratio = 9 / 16,
+    plot.title = element_text(size = 12, hjust = 0.5, face = "bold")
+  ) +
+  scale_y_reverse()
+g_6
+```
+
+Visualization 7: Team Efficiency Plot
+```{r}
+plays <- clean_pbp(pbp_2019) %>% filter(season_type == 'REG') %>% filter(!is.na(posteam) & (rush == 1 | pass == 1))
+
+
+offense <- plays %>% group_by(posteam) %>% summarise(pass_off_epa = mean(epa[pass==1], na.rm = TRUE), rush_off_epa = mean(epa[rush==1], na.rm = TRUE), num_plays = n())
+defense <- plays %>% group_by(posteam) %>% summarise(pass_def_epa = mean(epa[pass==1], na.rm = TRUE), rush_def_epa = mean(epa[rush==1]), num_plays = n())
+
+
+g_7 <- offense %>% inner_join(logos, by = c("posteam" = "team_abbr")) %>%
+  ggplot(aes(x= pass_off_epa, y= rush_off_epa )) +
+  geom_hline(aes(yintercept = mean(rush_off_epa)), color = "red", linetype = "dashed") +
+  geom_vline(aes(xintercept = mean(pass_off_epa)), color = "red", linetype = "dashed") +
+  geom_image(aes(image = team_logo_espn), size = 0.05, asp = 16 / 9) +
+  labs(y = "Rush EPA/Play",
+       x = "Pass EPA/Play",
+       title = "Team Efficiency",
+       subtitle = "2019 Season") +
+  dark_theme_bw() +
+  theme(
+    axis.text = element_text(size = 10),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 16),
+    plot.subtitle = element_text(size = 14),
+    plot.caption = element_text(size = 10))
+g_7
+```
+
+SAME GRAPS AS ABOVE CAN BE CREATED FOR THE 2020 SEASON
+
+Calculating Team Wins - 2019
+```{r}
+# Extract game results data from play by play data
+game_res_2019 <- unique(pbp_2019[, c("home_team", "away_team",  "home_score", "away_score", "week")])
+# Create vector to store winning team
+win_team_2019 <- rep(NA, nrow(game_res_2019))
+# Assign winning team as home team if home team scored more points
+win_team_2019[game_res_2019$home_score > game_res_2019$away_score] <- 
+  game_res_2019$home_team[game_res_2019$home_score > game_res_2019$away_score]
+# Assign winning team as away team if away team scored more points
+win_team_2019[game_res_2019$away_score > game_res_2019$home_score] <- 
+  game_res_2019$away_team[game_res_2019$away_score > game_res_2019$home_score]
+# Add wining team to game results data frame
+game_res_2019$win_team_2019 <- win_team_2019
+# Create vector to store winning team
+team_wins_2019 <- rep(NA, length(teams))
+# For each team
+for(i in 1:length(teams)){
+  # Calculate the number of wins that team had
+  team_wins_2019[i] <- sum(game_res_2019$win_team_2019 == teams[i], na.rm = T)
+}
+# Create team data frame with team names and wins
+team_db_2019 <- cbind.data.frame(teams, team_wins_2019)
+# Print team data frame
+team_db_2019
+```
+
+Calculating Team Wins 2020
+```{r}
+# Extract game results data from play by play data
+game_res_2020 <- unique(pbp_2020[, c("home_team", "away_team",  "home_score", "away_score", "week")])
+# Create vector to store winning team
+win_team_2020 <- rep(NA, nrow(game_res_2020))
+# Assign winning team as home team if home team scored more points
+win_team_2020[game_res_2020$home_score > game_res_2020$away_score] <- 
+  game_res_2020$home_team[game_res_2020$home_score > game_res_2020$away_score]
+# Assign winning team as away team if away team scored more points
+win_team_2020[game_res_2020$away_score > game_res_2020$home_score] <- 
+  game_res_2020$away_team[game_res_2020$away_score > game_res_2020$home_score]
+# Add wining team to game results data frame
+game_res_2020$win_team_2020 <- win_team_2020
+# Create vector to store winning team
+team_wins_2020 <- rep(NA, length(teams))
+# For each team
+for(i in 1:length(teams)){
+  # Calculate the number of wins that team had
+  team_wins_2020[i] <- sum(game_res_2020$win_team_2020 == teams[i], na.rm = T)
+}
+# Create team data frame with team names and wins
+team_db_2020 <- cbind.data.frame(teams, team_wins_2020)
+# Print team data frame
+team_db_2020
+```
+
+Offense/Defense WPA and EPA Statistics Combined - 2019 (No Team Names)
+```{r}
+# Extract key offensive statistics in 2019
+off_dat_2019 <- cbind.data.frame(off_epa_dat_2019[, c("avg_run_epa", "avg_pass_epa",
+                                            "avg_rz_run_epa", "avg_rz_pass_epa",
+                                            "runs_per_game", "pass_per_game",
+                                            "rz_runs_per_game", "rz_pass_per_game")],
+                            off_wpa_dat_2019[, c("avg_run_wpa", "avg_pass_wpa",
+                                            "avg_rz_run_wpa", "avg_rz_pass_wpa")])
+# Calculate overall offensive balance in 2019
+off_dat_2019$off_balance_2019 <- off_dat_2019$pass_per_game/(off_dat_2019$runs_per_game + off_dat_2019$pass_per_game)
+# Calculate red-zone offensive balance in 2019
+off_dat_2019$rz_off_balance_2019 <- off_dat_2019$rz_pass_per_game/(off_dat_2019$rz_runs_per_game + off_dat_2019$runs_per_game)
+
+# Extract key defensive statistics in 2019
+def_dat_2019 <- cbind.data.frame(def_epa_dat_2019[, c("avg_run_epa", "avg_pass_epa",
+                                            "avg_rz_run_epa", "avg_rz_pass_epa",
+                                            "runs_per_game", "pass_per_game",
+                                            "rz_runs_per_game", "rz_pass_per_game")],
+                            def_wpa_dat_2019[, c("avg_run_wpa", "avg_pass_wpa",
+                                            "avg_rz_run_wpa", "avg_rz_pass_wpa")])
+
+#Next lets join key offensive and defensive statistics together. 
+# Add "def_" to defensive variable names
+names(def_dat_2019) <- paste("def_",names(def_dat_2019), sep="")
+# Join offensive and defensive variable together
+model_dat_2019 <- cbind.data.frame(off_dat_2019, def_dat_2019)
+```
+
+Offense/Defense WPA and EPA Statistics Combined - 2020 (No Team Names)
+```{r}
+# Extract key offensive statistics in 2020
+off_dat_2020 <- cbind.data.frame(off_epa_dat_2020[, c("avg_run_epa", "avg_pass_epa",
+                                                      "avg_rz_run_epa", "avg_rz_pass_epa",
+                                                      "runs_per_game", "pass_per_game",
+                                                      "rz_runs_per_game", "rz_pass_per_game")],
+                                 off_wpa_dat_2020[, c("avg_run_wpa", "avg_pass_wpa",
+                                                      "avg_rz_run_wpa", "avg_rz_pass_wpa")])
+# Calculate overall offensive balance in 2020
+off_dat_2020$off_balance_2020 <- off_dat_2020$pass_per_game/(off_dat_2020$runs_per_game + off_dat_2020$pass_per_game)
+# Calculate red-zone offensive balance in 2020
+off_dat_2020$rz_off_balance_2020 <- off_dat_2020$rz_pass_per_game/(off_dat_2020$rz_runs_per_game + off_dat_2020$runs_per_game)
+
+# Extract key defensive statistics in 2020
+def_dat_2020 <- cbind.data.frame(def_epa_dat_2020[, c("avg_run_epa", "avg_pass_epa",
+                                                      "avg_rz_run_epa", "avg_rz_pass_epa",
+                                                      "runs_per_game", "pass_per_game",
+                                                      "rz_runs_per_game", "rz_pass_per_game")],
+                                 def_wpa_dat_2020[, c("avg_run_wpa", "avg_pass_wpa",
+                                                      "avg_rz_run_wpa", "avg_rz_pass_wpa")])
+
+#Next lets join key offensive and defensive statistics together. 
+# Add "def_" to defensive variable names
+names(def_dat_2020) <- paste("def_",names(def_dat_2020), sep="")
+# Join offensive and defensive variable together
+model_dat_2020 <- cbind.data.frame(off_dat_2020, def_dat_2020)
+```
+
+Graphing the relationship between EPA, WPA statistics and total wins - 2019
+```{r}
+## Determine the relationship between (EPA, WPA) and wins - 2019. 
+plot_dat_1 <- cbind.data.frame(team_wins_2019, model_dat_2019[,1:4])
+ggpairs(plot_dat_1) 
+
+plot_dat_2 <- cbind.data.frame(team_wins_2019, model_dat_2019[,5:8])
+ggpairs(plot_dat_2)
+
+plot_dat_3 <- cbind.data.frame(team_wins_2019, model_dat_2019[,9:12])
+ggpairs(plot_dat_3)
+
+plot_dat_4 <- cbind.data.frame(team_wins_2019, model_dat_2019[,13:16])
+ggpairs(plot_dat_4)
+
+plot_dat_5 <- cbind.data.frame(team_wins_2019, model_dat_2019[,17:20])
+ggpairs(plot_dat_5)
+
+plot_dat_6 <- cbind.data.frame(team_wins_2019, model_dat_2019[,21:24])
+ggpairs(plot_dat_6)
+
+plot_dat_7 <- cbind.data.frame(team_wins_2019, model_dat_2019[,25:26])
+ggpairs(plot_dat_7)
+```
+
+CAN RUN SAME CODE FOR COLUMNS [5:22] TO DETERMINE RELATIONSHIP WITH THOSE VARIABLES.  GRAPHS ABOVE ONLY SHOW RELATIONSHIP FOR VARIABLES 1:4.  
+
+CLUSTERING
+
+Adding Team Variable back to the Offense Statistics - 2019
+```{r}
+off_dat_2019_teams <- cbind.data.frame(off_epa_dat_2019[, c("team","avg_run_epa", "avg_pass_epa",
+                                                      "avg_rz_run_epa", "avg_rz_pass_epa",
+                                                      "runs_per_game", "pass_per_game",
+                                                      "rz_runs_per_game", "rz_pass_per_game")],
+                                 off_wpa_dat_2019[, c("avg_run_wpa", "avg_pass_wpa",
+                                                      "avg_rz_run_wpa", "avg_rz_pass_wpa")])
+```
+
+Scaling the data for clustering
+```{r}
+# Scale offensive data
+off_dat_2019_teams_2 <- scale(off_dat_2019_teams[,2:13])
+# Add teams back to data frame
+off_dat_2019_teams <- cbind.data.frame(off_dat_2019_teams$team, off_dat_2019_teams_2)
+# Fix name of team column
+names(off_dat_2019_teams)[1] <- "team"
+```
+
+Cluster Analysis - 4 Clusters
+```{r}
+set.seed(12345) # Set seed for reproducibility
+fit_1 <- kmeans(x = off_dat_2019_teams[2:13], # Set data as explantory variables 
+                centers = 4,  # Set number of clusters
+                nstart = 25, # Set number of starts
+                iter.max = 100 ) # Set maximum number of iterations to use
+
+# Extract clusters
+clusters_1 <- fit_1$cluster
+# Extract centers
+centers_1 <- fit_1$centers
+
+#Lets first check how many samples have ended up in each cluster:
+  
+# Check samples per cluster
+summary(as.factor(clusters_1))
+```
+
+Teams in Each Cluster
+```{r}
+# Check teams in cluster 1
+cat("Cluster 1 teams:\n")
+off_dat_2019_teams$team[clusters_1 == 1]
+# Check teams in cluster 2
+cat("Cluster 2 teams:\n")
+off_dat_2019_teams$team[clusters_1 == 2]
+# Check teams in cluster 3
+cat("Cluster 3 teams:\n")
+off_dat_2019_teams$team[clusters_1 == 3]
+# Check teams in cluster 4
+cat("Cluster 4 teams:\n")
+off_dat_2019_teams$team[clusters_1 == 4]
+```
+
+Heatmap of 4 Clusters
+```{r}
+# Create vector of clusters
+cluster <- c(1: 4)
+# Extract centers
+center_df <- data.frame(cluster, centers_1)
+
+# Reshape the data
+
+center_reshape <- gather(center_df, features, values, avg_run_epa:avg_rz_pass_wpa)
+head(center_reshape)
+
+g_heat_1 <- ggplot(data = center_reshape, aes(x = features, y = cluster, fill = values)) +
+  scale_y_continuous(breaks = seq(1, 4, by = 1)) +
+  geom_tile() +
+  coord_equal() + 
+  theme_set(theme_bw(base_size = 22) ) +
+  scale_fill_gradient2(low = "blue", # Choose low color
+                       mid = "white", # Choose mid color
+                       high = "red", # Choose high color
+                       midpoint =0, # Choose mid point
+                       space = "Lab", 
+                       na.value ="grey", # Choose NA value
+                       guide = "colourbar", # Set color bar
+                       aesthetics = "fill") + # Select aesthetics to apply
+  coord_flip()
+g_heat_1
+```
+
+From this cluster analysis with 4 clusters, Baltimore is an outlier and is in cluster 4 by itself. 
+Cluster 3 consists of really good teams.  Cluster 2 consists of really poor teams. Cluster 1 contains mediocre teams.  
+
+Graph trying to plot optimal number of clusters with dataset
+```{r}
+# Create function to try different cluster numbers
+kmean_withinss <- function(k) {
+  cluster <- kmeans( x = off_dat_2019_teams[,2:13],  # Set data to use
+                     centers = k,  # Set number of clusters as k, changes with input into function
+                     nstart = 25, # Set number of starts
+                     iter.max = 100) # Set max number of iterations
+  return (cluster$tot.withinss) # Return cluster error/within cluster sum of squares
+}
+
+
+# Set maximum cluster number
+max_k <-20
+# Run algorithm over a range of cluster numbers 
+wss <- sapply(2:max_k, kmean_withinss)
+
+
+# Create a data frame to plot the graph
+elbow <-data.frame(2:max_k, wss)
+
+# Plot the graph with gglop
+g_8 <- ggplot(elbow, aes(x = X2.max_k, y = wss)) +
+  theme_set(theme_bw(base_size = 22) ) +
+  geom_point(color = "blue") +
+  geom_line() +
+  scale_x_continuous(breaks = seq(1, 20, by = 1)) +
+  labs(x = "Number of Clusters", y="Within Cluster \nSum of Squares") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+g_8
+```
+
+Cluster Analysis - 2 Clusters
+```{r}
+set.seed(12345) # Set seed for reproducibility
+fit_2 <- kmeans(x = off_dat_2019_teams[2:13], # Set data as explantory variables 
+                centers = 2,  # Set number of clusters
+                nstart = 25, # Set number of starts
+                iter.max = 100 ) # Set maximum number of iterations to use
+
+# Extract clusters
+clusters_2 <- fit_2$cluster
+# Extract centers
+centers_2 <- fit_2$centers
+
+#Lets first check how many samples have ended up in each cluster:
+
+# Check samples per cluster
+summary(as.factor(clusters_2))
+```
+
+Teams in each of the 2 Clusters
+```{r}
+# Check teams in cluster 1
+cat("Cluster 1 teams:\n")
+off_dat_2019_teams$team[clusters_2 == 1]
+# Check teams in cluster 2
+cat("Cluster 2 teams:\n")
+off_dat_2019_teams$team[clusters_2 == 2]
+```
+
+Heatmap of 2 Cluster Analysis
+```{r}
+
+# Create vector of clusters
+cluster2 <- c(1:2)
+# Extract centers
+center_df2 <- data.frame(cluster2, centers_2)
+
+# Reshape the data
+
+center_reshape2 <- gather(center_df2, features, values, avg_run_epa:avg_rz_pass_wpa)
+head(center_reshape2)
+
+g_heat_2 <- ggplot(data = center_reshape2, aes(x = features, y = cluster2, fill = values)) +
+  scale_y_continuous(breaks = seq(1, 2, by = 1)) +
+  geom_tile() +
+  coord_equal() + 
+  theme_set(theme_bw(base_size = 22) ) +
+  scale_fill_gradient2(low = "blue", # Choose low color
+                       mid = "white", # Choose mid color
+                       high = "red", # Choose high color
+                       midpoint =0, # Choose mid point
+                       space = "Lab", 
+                       na.value ="grey", # Choose NA value
+                       guide = "colourbar", # Set color bar
+                       aesthetics = "fill") + # Select aesthetics to apply
+  coord_flip()
+g_heat_2
+
+```
+
+XG BOOST PREDICTION MODEL
+# Predicting Game Outcomes
+
+Loading in Game Results from 2011 - 2020.  2011 - 2018 is the training data and 2019 - 2020 is the Test Dataset. 
+```{r}
+load("nfl_results.rda")
+
+res_train <- rbind.data.frame(res_db_2011,
+                              res_db_2012,
+                              res_db_2013,
+                              res_db_2014,
+                              res_db_2015,
+                              res_db_2016,
+                              res_db_2018)
+
+res_test <- rbind.data.frame(res_db_2019,
+                             res_db_2020)
+```
+
+Creating Score Differential Variables and making predictions for Training and Test Datasets
+```{r}
+
+# Create score differential
+res_train$score_diff <- res_train$home_score - res_train$away_score
+
+# Make preds
+XG_dat_train = res_train[,c(1:2,5:17, 19:34, 36:51,53:68, 70:88)]
+XG_dat_train
+XG_dat_train$pred_score <- XG_dat_train$pred_home_points - XG_dat_train$pred_away_points
+
+# Create test score differential
+res_test$score_diff <- res_test$home_score - res_test$away_score
+
+# Make preds
+XG_dat_test = res_test[,c(1:2,5:17, 19:34, 36:51,53:68, 70:88)]
+XG_dat_test
+
+XG_dat_test$pred_score <- XG_dat_test$pred_home_points - XG_dat_test$pred_away_points
+```
+
+Dropping any ties from the dataset
+```{r}
+# Drop draws
+XG_dat_train <- XG_dat_train[XG_dat_train$score_diff != 0,]
+```
+
+Putting Train and Test data into matrixes
+```{r}
+
+# Set up XGBoost
+
+dtrain <- xgb.DMatrix(data = as.matrix(XG_dat_train[, c(4:81,83)]), 
+                      label = XG_dat_train$score_diff)
+# Create test matrix
+dtest <- xgb.DMatrix(data = as.matrix(XG_dat_test[, c(4:81,83)]), 
+                     label = XG_dat_test$score_diff)
+
+
+```
+
+Running Naive Model
+```{r}
+set.seed(111111)
+bst_1 <- xgboost(data = dtrain, # Set training data
+                 nrounds = 100, # Set number of rounds
+                 eta = 0.1,
+                 verbose = 1, # 1 - Prints out fit
+                 print_every_n = 20) # Prints out result every 20th iteration
+
+
+
+boost_preds <- predict(bst_1, dtest) # Create predictions for xgboost model
+
+t <- table(as.numeric(boost_preds > 0), as.numeric(XG_dat_test$score_diff > 0)) # Create table
+confusionMatrix(t, positive = "1") # Produce confusion matrix
+
+plot_data <- cbind.data.frame(boost_preds, XG_dat_test$score_diff)
+names(plot_data) <- c("preds", "actual")
+ggplot(plot_data, aes(x = preds, y = actual)) +
+  geom_smooth() +
+  geom_point()
+
+```
+
+Tuning the Model for Max Depth and Minimum Child Weight
+```{r}
+set.seed(111111)
+bst <- xgb.cv(data = dtrain, # Set training data
+              
+              nfold = 5, # Use 5 fold cross-validation
+              
+              eta = 0.01, # Set learning rate
+              
+              nrounds = 1000, # Set number of rounds
+              early_stopping_rounds = 50, # Set number of rounds to stop at if there is no improvement
+              
+              verbose = 1, # 1 - Prints out fit
+              nthread = 1, # Set number of parallel threads
+              print_every_n = 20) # Prints out result every 20th iteration
+# Be Careful - This can take a very long time to run
+max_depth_vals <- c(3, 5, 7, 10, 15) # Create vector of max depth values
+min_child_weight <- c(1,3,5,7, 10, 15) # Create vector of min child values
+
+# Expand grid of parameter values
+cv_params <- expand.grid(max_depth_vals, min_child_weight)
+names(cv_params) <- c("max_depth", "min_child_weight")
+# Create results vector
+RMSE_vec <- rep(NA, nrow(cv_params)) 
+# Loop through results
+for(i in 1:nrow(cv_params)){
+  set.seed(111111)
+  bst_tune <- xgb.cv(data = dtrain, # Set training data
+                     
+                     nfold = 5, # Use 5 fold cross-validation
+                     
+                     eta = 0.01, # Set learning rate
+                     max.depth = cv_params$max_depth[i], # Set max depth
+                     min_child_weight = cv_params$min_child_weight[i], # Set minimum number of samples in node to split
+                     
+                     
+                     nrounds = 100, # Set number of rounds
+                     early_stopping_rounds = 20, # Set number of rounds to stop at if there is no improvement
+                     
+                     verbose = 1, # 1 - Prints out fit
+                     nthread = 1, # Set number of parallel threads
+                     print_every_n = 20) # Prints out result every 20th iteration
+  
+  
+  RMSE_vec[i] <- bst_tune$evaluation_log$test_rmse_mean[bst_tune$best_ntreelimit]
+  
+}              
+
+res_db <- cbind.data.frame(cv_params,RMSE_vec)
+names(res_db)[3] <- c("rmse") 
+res_db$max_depth <- as.factor(res_db$max_depth) # Convert tree number to factor for plotting
+res_db$min_child_weight <- as.factor(res_db$min_child_weight) # Convert node size to factor for plotting
+# Print AUC heatmap
+g_2 <- ggplot(res_db, aes(y = max_depth, x = min_child_weight, fill = rmse)) + # set aesthetics
+  geom_tile() + # Use geom_tile for heatmap
+  theme_bw() + # Set theme
+  scale_fill_gradient2(low = "blue", # Choose low color
+                       mid = "white", # Choose mid color
+                       high = "red", # Choose high color
+                       midpoint =mean(res_db$rmse), # Choose mid point
+                       space = "Lab", 
+                       na.value ="grey", # Choose NA value
+                       guide = "colourbar", # Set color bar
+                       aesthetics = "fill") + # Select aesthetics to apply
+  labs(x = "Minimum Child Weight", y = "Max Depth", fill = "RMSE") # Set labels
+g_2 # Generate plot
+res_db
+```
+
+Tuning the Model for Gamma Value
+```{r}
+gamma_vals <- c(0, 0.05, 0.1, 0.15, 0.2) # Create vector of gamma values
+
+# Be Careful - This can take a very long time to run
+set.seed(111111)
+rmse_vec <- rep(NA, length(gamma_vals))
+for(i in 1:length(gamma_vals)){
+  bst_tune <- xgb.cv(data = dtrain, # Set training data
+                     
+                     nfold = 5, # Use 5 fold cross-validation
+                     
+                     eta = 0.01, # Set learning rate
+                     max.depth = 3, # Set max depth
+                     min_child_weight = 10, # Set minimum number of samples in node to split
+                     gamma = gamma_vals[i], # Set minimum loss reduction for split
+                     
+                     
+                     
+                     nrounds = 109, # Set number of rounds
+                     early_stopping_rounds = 20, # Set number of rounds to stop at if there is no improvement
+                     
+                     verbose = 1, # 1 - Prints out fit
+                     nthread = 1, # Set number of parallel threads
+                     print_every_n = 20) # Prints out result every 20th iteration
+  
+  
+  rmse_vec[i] <- bst_tune$evaluation_log$test_rmse_mean[bst_tune$best_ntreelimit]
+  
+  
+}
+
+cbind.data.frame(gamma_vals, rmse_vec)
+
+```
+
+Tuning the Model for subsample and colsample
+```{r}
+# Be Careful - This can take a very long time to run
+subsample <- c(0.6, 0.7, 0.8, 0.9, 1) # Create vector of subsample values
+colsample_by_tree <- c(0.6, 0.7, 0.8, 0.9, 1) # Create vector of col sample values
+
+# Expand grid of tuning parameters
+cv_params <- expand.grid(subsample, colsample_by_tree)
+names(cv_params) <- c("subsample", "colsample_by_tree")
+# Create vectors to store results
+rmse_vec <- rep(NA, nrow(cv_params)) 
+# Loop through parameter values
+for(i in 1:nrow(cv_params)){
+  set.seed(111111)
+  bst_tune <- xgb.cv(data = dtrain, # Set training data
+                     
+                     nfold = 5, # Use 5 fold cross-validation
+                     
+                     eta = 0.01, # Set learning rate
+                     max.depth = 3, # Set max depth
+                     min_child_weight = 10, # Set minimum number of samples in node to split
+                     gamma = .10, # Set minimum loss reduction for split
+                     subsample = cv_params$subsample[i], # Set proportion of training data to use in tree
+                     colsample_bytree = cv_params$colsample_by_tree[i], # Set number of variables to use in each tree
+                     
+                     nrounds = 150, # Set number of rounds
+                     early_stopping_rounds = 20, # Set number of rounds to stop at if there is no improvement
+                     
+                     verbose = 1, # 1 - Prints out fit
+                     nthread = 1, # Set number of parallel threads
+                     print_every_n = 20) # Prints out result every 20th iteration
+  
+  
+  rmse_vec[i] <- bst_tune$evaluation_log$test_rmse_mean[bst_tune$best_ntreelimit]
+  
+  
+}
+
+res_db <- cbind.data.frame(cv_params, rmse_vec)
+names(res_db)[3] <- c("rmse") 
+res_db$subsample <- as.factor(res_db$subsample) # Convert tree number to factor for plotting
+res_db$colsample_by_tree <- as.factor(res_db$colsample_by_tree) # Convert node size to factor for plotting
+g_4 <- ggplot(res_db, aes(y = colsample_by_tree, x = subsample, fill = rmse)) + # set aesthetics
+  geom_tile() + # Use geom_tile for heatmap
+  theme_bw() + # Set theme
+  scale_fill_gradient2(low = "blue", # Choose low color
+                       mid = "white", # Choose mid color
+                       high = "red", # Choose high color
+                       midpoint =mean(res_db$rmse), # Choose mid point
+                       space = "Lab", 
+                       na.value ="grey", # Choose NA value
+                       guide = "colourbar", # Set color bar
+                       aesthetics = "fill") + # Select aesthetics to apply
+  labs(x = "Subsample", y = "Column Sample by Tree", fill = "RMSE") # Set labels
+g_4 # Generate plot
+res_db
+```
+
+Tuning the model for ETA values
+```{r}
+set.seed(111111)
+bst_mod_1 <- xgb.cv(data = dtrain, # Set training data
+                    
+                    nfold = 5, # Use 5 fold cross-validation
+                    
+                    eta = 0.3, # Set learning rate
+                    max.depth = 3, # Set max depth
+                    min_child_weight = 10 , # Set minimum number of samples in node to split
+                    gamma = 0.10, # Set minimum loss reduction for split
+                    subsample = 0.7 , # Set proportion of training data to use in tree
+                    colsample_bytree =  0.7, # Set number of variables to use in each tree
+                    
+                    nrounds = 1000, # Set number of rounds
+                    early_stopping_rounds = 20, # Set number of rounds to stop at if there is no improvement
+                    
+                    verbose = 1, # 1 - Prints out fit
+                    nthread = 1, # Set number of parallel threads
+                    print_every_n = 20) # Prints out result every 20th iteration
+
+
+set.seed(111111)
+bst_mod_2 <- xgb.cv(data = dtrain, # Set training data
+                    
+                    nfold = 5, # Use 5 fold cross-validation
+                    
+                    eta = 0.1, # Set learning rate
+                    max.depth = 3, # Set max depth
+                    min_child_weight = 10 , # Set minimum number of samples in node to split
+                    gamma = 0.10, # Set minimum loss reduction for split
+                    subsample = 0.7 , # Set proportion of training data to use in tree
+                    colsample_bytree =  0.7, # Set number of variables to use in each tree
+                    
+                    nrounds = 1000, # Set number of rounds
+                    early_stopping_rounds = 20, # Set number of rounds to stop at if there is no improvement
+                    
+                    verbose = 1, # 1 - Prints out fit
+                    nthread = 1, # Set number of parallel threads
+                    print_every_n = 20) # Prints out result every 20th iteration
+
+set.seed(111111)
+bst_mod_3 <- xgb.cv(data = dtrain, # Set training data
+                    
+                    nfold = 5, # Use 5 fold cross-validation
+                    
+                    eta = 0.05, # Set learning rate
+                    max.depth = 3, # Set max depth
+                    min_child_weight = 10 , # Set minimum number of samples in node to split
+                    gamma = 0.10, # Set minimum loss reduction for split
+                    subsample = 0.7 , # Set proportion of training data to use in tree
+                    colsample_bytree =  0.7, # Set number of variables to use in each tree
+                    
+                    nrounds = 1000, # Set number of rounds
+                    early_stopping_rounds = 20, # Set number of rounds to stop at if there is no improvement
+                    
+                    verbose = 1, # 1 - Prints out fit
+                    nthread = 1, # Set number of parallel threads
+                    print_every_n = 20) # Prints out result every 20th iteration
+set.seed(111111)
+
+bst_mod_4 <- xgb.cv(data = dtrain, # Set training data
+                    
+                    nfold = 5, # Use 5 fold cross-validation
+                    
+                    eta = 0.01, # Set learning rate
+                    max.depth = 3, # Set max depth
+                    min_child_weight = 10 , # Set minimum number of samples in node to split
+                    gamma = 0.10, # Set minimum loss reduction for split
+                    subsample = 0.7 , # Set proportion of training data to use in tree
+                    colsample_bytree =  0.7, # Set number of variables to use in each tree
+                    
+                    nrounds = 1000, # Set number of rounds
+                    early_stopping_rounds = 20, # Set number of rounds to stop at if there is no improvement
+                    
+                    verbose = 1, # 1 - Prints out fit
+                    nthread = 1, # Set number of parallel threads
+                    print_every_n = 20) # Prints out result every 20th iteration
+
+set.seed(111111)
+bst_mod_5 <- xgb.cv(data = dtrain, # Set training data
+                    
+                    nfold = 5, # Use 5 fold cross-validation
+                    
+                    eta = 0.001, # Set learning rate
+                    max.depth = 3, # Set max depth
+                    min_child_weight = 10 , # Set minimum number of samples in node to split
+                    gamma = 0.10, # Set minimum loss reduction for split
+                    subsample = 0.7 , # Set proportion of training data to use in tree
+                    colsample_bytree =  0.7, # Set number of variables to use in each tree
+                    
+                    nrounds = 1000, # Set number of rounds
+                    early_stopping_rounds = 20, # Set number of rounds to stop at if there is no improvement
+                    
+                    verbose = 1, # 1 - Prints out fit
+                    nthread = 1, # Set number of parallel threads
+                    print_every_n = 20) # Prints out result every 20th iteration
+
+pd1 <- cbind.data.frame(bst_mod_1$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.3, nrow(bst_mod_1$evaluation_log)))
+names(pd1)[3] <- "eta"
+# Extract results for model with eta = 0.1
+pd2 <- cbind.data.frame(bst_mod_2$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.1, nrow(bst_mod_2$evaluation_log)))
+names(pd2)[3] <- "eta"
+# Extract results for model with eta = 0.05
+pd3 <- cbind.data.frame(bst_mod_3$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.05, nrow(bst_mod_3$evaluation_log)))
+names(pd3)[3] <- "eta"
+# Extract results for model with eta = 0.01
+pd4 <- cbind.data.frame(bst_mod_4$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.01, nrow(bst_mod_4$evaluation_log)))
+names(pd4)[3] <- "eta"
+# Extract results for model with eta = 0.005
+pd5 <- cbind.data.frame(bst_mod_5$evaluation_log[,c("iter", "test_rmse_mean")], rep(0.005, nrow(bst_mod_5$evaluation_log)))
+names(pd5)[3] <- "eta"
+# Join datasets
+plot_data <- rbind.data.frame(pd1, pd2, pd3, pd4, pd5)
+# Converty ETA to factor
+plot_data$eta <- as.factor(plot_data$eta)
+
+g_7 <- ggplot(plot_data, aes(x = iter, y = test_rmse_mean, color = eta))+
+  geom_smooth(alpha = 0.5) +
+  theme_bw() + # Set theme
+  theme(panel.grid.major = element_blank(), # Remove grid
+        panel.grid.minor = element_blank(), # Remove grid
+        panel.border = element_blank(), # Remove grid
+        panel.background = element_blank()) + # Remove grid 
+  labs(x = "Number of Trees", title = "Error Rate v Number of Trees",
+       y = "Error Rate", color = "Learning \n Rate")  # Set labels
+g_7
+
+```
+
+Running Final XG Boost Model with all the tuned parameters
+```{r}
+set.seed(111111)
+bst_final <- xgboost(data = dtrain, # Set training data
+                     nrounds = 100, # Set number of rounds
+                     eta = 0.01,
+                     max.depth = 3, # Set max depth
+                     min_child_weight = 10 , # Set minimum number of samples in node to split
+                     gamma = 0.10, # Set minimum loss reduction for split
+                     subsample = 0.7 , # Set proportion of training data to use in tree
+                     colsample_bytree =  0.7, # Set number of variables to use in each tree
+                     verbose = 1, # 1 - Prints out fit
+                     print_every_n = 20) # Prints out result every 20th iteration
+
+
+
+boost_preds <- predict(bst_final, dtest) # Create predictions for xgboost model
+
+t <- table(as.numeric(boost_preds > 0), as.numeric(XG_dat_test$score_diff > 0)) # Create table
+confusionMatrix(t, positive = "1") # Produce confusion matrix
+
+```
+
+```{r}
+shap_values <- predict(bst_final,
+                     dtrain,
+                    predcontrib = TRUE,
+                    approxcontrib = F)
+
+shap_values[1,]
+```
+
+
+Feature Importance of the Final XG Boost Model
+```{r}
+# Extract importance
+imp_mat <- xgb.importance(model = bst_final)
+# Plot importance (top 10 variables)
+xgb.plot.importance(imp_mat, top_n = 10)
+```
+
+```{r}
+library(SHAPforxgboost)
+source("a_insights_shap_functions.r")
+shap_result <- shap.score.rank(xgb_model = bst_final, 
+                X_train =  as.matrix(XG_dat_train[, c(4:81,83)]),
+                shap_approx = F)
+var_importance(shap_result, top_n=10)
+```
+
+```{r}
+shap_long = shap.prep(shap = shap_result,
+                           X_train =  as.matrix(XG_dat_train[, c(4:81,83)]), 
+                           top_n = 10)
+
+
+plot.shap.summary(data_long = shap_long)
+```
+
